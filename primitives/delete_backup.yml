@@ -1,0 +1,36 @@
+# primitives/delete_backup.yml
+# ---------------------------------------------------------------------------
+# Primitive: delete_backup
+# Variables required:
+#   backup_id          - archive filename to delete
+#   backup_server_ip   - IP of central backup server
+#   backup_server_user - SSH user on backup server
+#   backup_base_path   - base path on backup server
+# ---------------------------------------------------------------------------
+
+- name: "[delete_backup] Derive meta filename"
+  ansible.builtin.set_fact:
+    delete_meta_name: "{{ backup_id | regex_replace('\\.tar\\.gz$|\\.zip$', '') }}.meta.json"
+    delete_machine:   "{{ filter_machine | default(inventory_hostname) }}"
+
+- name: "[delete_backup] Remove archive from backup server"
+  ansible.builtin.shell: |
+    ssh -o StrictHostKeyChecking=no \
+        {{ backup_server_user }}@{{ backup_server_ip }} \
+        "rm -f {{ backup_base_path }}/{{ delete_machine }}/{{ backup_id }}"
+  delegate_to: localhost
+  register: del_archive
+  changed_when: del_archive.rc == 0
+
+- name: "[delete_backup] Remove metadata from backup server"
+  ansible.builtin.shell: |
+    ssh -o StrictHostKeyChecking=no \
+        {{ backup_server_user }}@{{ backup_server_ip }} \
+        "rm -f {{ backup_base_path }}/{{ delete_machine }}/{{ delete_meta_name }}"
+  delegate_to: localhost
+  register: del_meta
+  changed_when: del_meta.rc == 0
+
+- name: "[delete_backup] Confirm deletion"
+  ansible.builtin.debug:
+    msg: "🗑️  Deleted {{ backup_id }} and {{ delete_meta_name }} from backup server for machine {{ delete_machine }}"

@@ -1,0 +1,70 @@
+---
+# playbooks/backup_config_files.yml
+# ---------------------------------------------------------------------------
+# Task 1: Backup Critical Configuration Files
+# Problem: If system config files are lost, network settings break.
+# Linux  : /etc/network/interfaces, /etc/resolv.conf, /etc/hosts
+# Windows: Registry network key + C:\Windows\System32\drivers\etc\hosts
+# ---------------------------------------------------------------------------
+
+- name: "Backup Critical Configuration Files"
+  hosts: "{{ target_hosts | default('lab') }}"
+  gather_facts: yes
+  vars:
+    backup_dest:        "/var/backups/lab_backups"
+    backup_dest_win:    "C:\\BackupStorage"
+    backup_server_ip:   "{{ groups['backup_server'][0] }}"
+    backup_server_user: "backup_admin"
+    backup_base_path:   "/mnt/backups"
+
+    linux_config_files:
+      - /etc/hosts
+      - /etc/resolv.conf
+      - /etc/network/interfaces
+      - /etc/hostname
+
+    windows_reg_export:  "C:\\Temp\\network_registry.reg"
+    windows_hosts_file:  'C:\Windows\System32\drivers\etc\hosts'
+
+  tasks:
+
+    # ── Linux ───────────────────────────────────────────────────────────────
+    - name: "Check which Linux config files actually exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ linux_config_files }}"
+      register: linux_config_stat
+      when: ansible_os_family != "Windows"
+
+    - name: "Back up each existing Linux config file"
+      ansible.builtin.include_tasks: ../primitives/create_backup.yml
+      vars:
+        backup_source: "{{ item.stat.path }}"
+      loop: "{{ linux_config_stat.results | selectattr('stat.exists', 'true') | list }}"
+      loop_control:
+        label: "{{ item.stat.path }}"
+      when: ansible_os_family != "Windows"
+
+    # ── Windows ─────────────────────────────────────────────────────────────
+    - name: "[Windows] Export network registry key to .reg file"
+      ansible.windows.win_shell: |
+        reg export "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" `
+                   "{{ windows_reg_export }}" /y
+      when: ansible_os_family == "Windows"
+      register: reg_export_result
+
+    - name: "[Windows] Back up exported registry file"
+      ansible.builtin.include_tasks: ../primitives/create_backup.yml
+      vars:
+        backup_source: "{{ windows_reg_export }}"
+        backup_dest:   "{{ backup_dest_win }}"
+      when:
+        - ansible_os_family == "Windows"
+        - reg_export_result.rc == 0
+
+    - name: "[Windows] Back up Windows hosts file"
+      ansible.builtin.include_tasks: ../primitives/create_backup.yml
+      vars:
+        backup_source: "{{ windows_hosts_file }}"
+        backup_dest:   "{{ backup_dest_win }}"
+      when: ansible_os_family == "Windows"

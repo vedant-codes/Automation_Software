@@ -1,0 +1,66 @@
+---
+# playbooks/schedule_backup.yml
+# ---------------------------------------------------------------------------
+# Task 5: Scheduled Automatic Backups
+# Problem: Admin cannot manually backup every lab computer.
+# Linux Tool : cron
+# Windows Tool: Task Scheduler (win_scheduled_task)
+# ---------------------------------------------------------------------------
+
+- name: "Setup Automatic Scheduled Backups"
+  hosts: "{{ target_hosts | default('lab') }}"
+  gather_facts: yes
+  vars:
+    backup_server_ip:   "{{ groups['backup_server'][0] }}"
+    backup_server_user: "backup_admin"
+    backup_base_path:   "/mnt/backups"
+    # Override via -e:
+    sched_interval_min: 1440          # default = daily (24 * 60)
+    sched_job_name:     "lab_auto_backup"
+
+    # Config file targets per OS
+    linux_config_sources:
+      - { source: "/etc/hosts",                    dest: "/var/backups/lab_backups", job: "backup_hosts" }
+      - { source: "/etc/resolv.conf",              dest: "/var/backups/lab_backups", job: "backup_resolv" }
+      - { source: "/etc/network/interfaces",       dest: "/var/backups/lab_backups", job: "backup_interfaces" }
+
+    windows_config_sources:
+      - { source: 'C:\Windows\System32\drivers\etc\hosts', dest: "C:\\BackupStorage", job: "backup_win_hosts" }
+      - { source: 'C:\Temp\network_registry.reg',          dest: "C:\\BackupStorage", job: "backup_win_reg" }
+
+  tasks:
+
+    # ── Linux ───────────────────────────────────────────────────────────────
+    - name: "[Linux] Schedule backup for each config file"
+      ansible.builtin.include_tasks: ../primitives/schedule_backup.yml
+      vars:
+        sched_source:       "{{ item.source }}"
+        sched_dest:         "{{ item.dest }}"
+        sched_job_name:     "{{ item.job }}"
+      loop: "{{ linux_config_sources }}"
+      loop_control:
+        label: "{{ item.source }}"
+      when: ansible_os_family != "Windows"
+
+    # ── Windows ─────────────────────────────────────────────────────────────
+    - name: "[Windows] Export registry before scheduling (so the file exists)"
+      ansible.windows.win_shell: |
+        reg export "HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters" `
+                   "C:\Temp\network_registry.reg" /y
+      when: ansible_os_family == "Windows"
+      ignore_errors: yes
+
+    - name: "[Windows] Schedule backup for each config file"
+      ansible.builtin.include_tasks: ../primitives/schedule_backup.yml
+      vars:
+        sched_source:   "{{ item.source }}"
+        sched_dest:     "{{ item.dest }}"
+        sched_job_name: "{{ item.job }}"
+      loop: "{{ windows_config_sources }}"
+      loop_control:
+        label: "{{ item.source }}"
+      when: ansible_os_family == "Windows"
+
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg: "⏰ Auto-backup scheduled every {{ sched_interval_min }} minutes on {{ inventory_hostname }}"

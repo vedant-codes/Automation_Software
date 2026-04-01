@@ -1,0 +1,73 @@
+---
+# playbooks/restore_config.yml
+# ---------------------------------------------------------------------------
+# Task 2: Restore Configuration After Failure
+# Problem: A lab computer loses network settings after a system crash.
+# Solution: Restore previously saved configuration backup.
+# ---------------------------------------------------------------------------
+
+- name: "Restore Configuration After Failure"
+  hosts: "{{ target_hosts | default('lab') }}"
+  gather_facts: yes
+  vars:
+    # Required: pass -e "backup_id=hosts_backup_20250401_143005_123456.tar.gz"
+    backup_id: "{{ backup_id | mandatory }}"
+    backup_server_ip:   "{{ groups['backup_server'][0] }}"
+    backup_server_user: "backup_admin"
+    backup_base_path:   "/mnt/backups"
+
+    # Where to restore on each OS
+    restore_target_linux: "/etc"
+    restore_target_win:   'C:\Windows\System32\drivers\etc'
+
+    # Windows registry file name (if this backup contained a .reg export)
+    reg_file_name: "network_registry.reg"
+
+  tasks:
+
+    # ── Linux ───────────────────────────────────────────────────────────────
+    - name: "[Linux] Restore config backup to /etc/"
+      ansible.builtin.include_tasks: ../primitives/restore_backup.yml
+      vars:
+        restore_target: "{{ restore_target_linux }}"
+      when: ansible_os_family != "Windows"
+
+    - name: "[Linux] Restart networking service after restore"
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - networking
+        - systemd-resolved
+      ignore_errors: yes
+      when: ansible_os_family != "Windows"
+
+    # ── Windows ─────────────────────────────────────────────────────────────
+    - name: "[Windows] Restore config backup"
+      ansible.builtin.include_tasks: ../primitives/restore_backup.yml
+      vars:
+        restore_target: "{{ restore_target_win }}"
+      when: ansible_os_family == "Windows"
+
+    - name: "[Windows] Check if registry export file was restored"
+      ansible.windows.win_stat:
+        path: "{{ restore_target_win }}\\{{ reg_file_name }}"
+      when: ansible_os_family == "Windows"
+      register: reg_file_stat
+
+    - name: "[Windows] Re-import registry settings if .reg file present"
+      ansible.windows.win_shell: |
+        reg import "{{ restore_target_win }}\{{ reg_file_name }}"
+      when:
+        - ansible_os_family == "Windows"
+        - reg_file_stat.stat.exists
+
+    - name: "[Windows] Restart network adapter after restore"
+      ansible.windows.win_shell: |
+        Restart-NetAdapter -Name "*" -Confirm:$false
+      when: ansible_os_family == "Windows"
+      ignore_errors: yes
+
+    - name: "Confirm restore completed"
+      ansible.builtin.debug:
+        msg: "✅ Restore of {{ backup_id }} completed on {{ inventory_hostname }}"

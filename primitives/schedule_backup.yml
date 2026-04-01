@@ -1,0 +1,65 @@
+# primitives/schedule_backup.yml
+# ---------------------------------------------------------------------------
+# Primitive: schedule_backup
+# Variables required:
+#   sched_source       - path to back up
+#   sched_dest         - local destination on managed node
+#   sched_interval_min - interval in minutes (e.g. 60, 1440)
+#   sched_job_name     - unique name for this scheduled job
+#   backup_server_ip   - passed through to create_backup
+#   backup_server_user - passed through to create_backup
+#   backup_base_path   - passed through to create_backup
+# ---------------------------------------------------------------------------
+
+- name: "[schedule_backup] Compute cron fields from interval"
+  ansible.builtin.set_fact:
+    cron_minute: "*/{{ sched_interval_min if sched_interval_min | int < 60 else '0' }}"
+    cron_hour:   "{{ '*' if sched_interval_min | int < 60 else '*/'+( (sched_interval_min | int // 60) | string ) }}"
+
+# ── Linux: cron ────────────────────────────────────────────────────────────
+- name: "[schedule_backup][Linux] Install cron job"
+  ansible.builtin.cron:
+    name:   "{{ sched_job_name }}"
+    minute: "{{ cron_minute }}"
+    hour:   "{{ cron_hour }}"
+    job: >
+      ansible-playbook /opt/automation_platform/playbooks/backup_config_files.yml
+      -i /opt/automation_platform/inventory/hosts.ini
+      -e "backup_source={{ sched_source }} backup_dest={{ sched_dest }}"
+      >> /var/log/backup_cron.log 2>&1
+    state: present
+    user: root
+  when: ansible_os_family != "Windows"
+
+- name: "[schedule_backup][Linux] Confirm cron created"
+  ansible.builtin.debug:
+    msg: "⏰ Cron job '{{ sched_job_name }}' scheduled every {{ sched_interval_min }} minutes on {{ inventory_hostname }}"
+  when: ansible_os_family != "Windows"
+
+# ── Windows: Task Scheduler ────────────────────────────────────────────────
+- name: "[schedule_backup][Windows] Create scheduled task"
+  community.windows.win_scheduled_task:
+    name:        "{{ sched_job_name }}"
+    description: "Automated backup of {{ sched_source }}"
+    actions:
+      - path:      "powershell.exe"
+        arguments: >
+          -NonInteractive -Command
+          "& ansible-playbook C:\automation_platform\playbooks\backup_config_files.yml
+          -i C:\automation_platform\inventory\hosts.ini
+          -e 'backup_source={{ sched_source }} backup_dest={{ sched_dest }}'"
+    triggers:
+      - type:     time
+        repetition:
+          interval: "PT{{ sched_interval_min }}M"
+    run_level:   highest
+    logon_type:  service_account
+    username:    SYSTEM
+    state:       present
+    enabled:     yes
+  when: ansible_os_family == "Windows"
+
+- name: "[schedule_backup][Windows] Confirm task created"
+  ansible.builtin.debug:
+    msg: "⏰ Windows Scheduled Task '{{ sched_job_name }}' created — interval {{ sched_interval_min }} min on {{ inventory_hostname }}"
+  when: ansible_os_family == "Windows"

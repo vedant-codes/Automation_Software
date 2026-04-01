@@ -1,0 +1,65 @@
+---
+# playbooks/cleanup_backups.yml
+# ---------------------------------------------------------------------------
+# Task 6: Manage Backup Storage
+# Problem: Backup storage server fills up over time.
+# Solution: List all backups, keep N newest per source, delete the rest.
+# ---------------------------------------------------------------------------
+
+- name: "Cleanup Old Backups"
+  hosts: localhost
+  gather_facts: no
+  vars:
+    backup_server_ip:   "{{ groups['backup_server'][0] }}"
+    backup_server_user: "backup_admin"
+    backup_base_path:   "/mnt/backups"
+    keep_latest:        5              # keep 5 most recent per machine; override with -e
+    # target one machine or 'all':  -e "cleanup_machine=linux-pc-01"
+    cleanup_machine:    "all"
+
+  tasks:
+
+    - name: "Determine which machine directories to clean"
+      ansible.builtin.shell: |
+        ssh -o StrictHostKeyChecking=no \
+            {{ backup_server_user }}@{{ backup_server_ip }} \
+            "ls -d {{ backup_base_path }}/{{ cleanup_machine if cleanup_machine != 'all' else '*' }}/ 2>/dev/null"
+      register: machine_dirs
+      changed_when: false
+
+    - name: "For each machine directory, identify and prune old backups"
+      ansible.builtin.shell: |
+        # List all .meta.json files sorted newest-first by filename (timestamp is in name)
+        ssh -o StrictHostKeyChecking=no \
+            {{ backup_server_user }}@{{ backup_server_ip }} \
+            "ls -t {{ item }}*.tar.gz {{ item }}*.zip 2>/dev/null | tail -n +{{ (keep_latest | int) + 1 }}"
+      loop: "{{ machine_dirs.stdout_lines }}"
+      register: old_backups_per_machine
+      changed_when: false
+
+    - name: "Delete identified old archives"
+      ansible.builtin.shell: |
+        ssh -o StrictHostKeyChecking=no \
+            {{ backup_server_user }}@{{ backup_server_ip }} \
+            "rm -f {{ item.1 }} {{ item.1 | regex_replace('\\.tar\\.gz$|\\.zip$', '') }}.meta.json"
+      loop: >-
+        {{
+          old_backups_per_machine.results
+          | subelements('stdout_lines', skip_missing=True)
+        }}
+      loop_control:
+        label: "{{ item.1 | basename }}"
+      when: item.1 | length > 0
+      register: delete_results
+
+    - name: "Count deleted files"
+      ansible.builtin.set_fact:
+        deleted_count: "{{ delete_results.results | selectattr('changed', 'true') | list | length }}"
+      when: delete_results is defined
+
+    - name: "Cleanup Summary"
+      ansible.builtin.debug:
+        msg: >-
+          🧹 Cleanup complete.
+          Kept latest {{ keep_latest }} backups per machine.
+          Removed {{ deleted_count | default(0) }} old backup(s).

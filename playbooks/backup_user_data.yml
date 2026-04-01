@@ -1,0 +1,110 @@
+---
+# playbooks/backup_user_data.yml
+# ---------------------------------------------------------------------------
+# Task 3: Backup User Work Before System Reimage
+# Problem: Before reinstalling OS, user work must be preserved.
+# Targets: Desktop, Documents, Lab project folders
+# ---------------------------------------------------------------------------
+
+- name: "Backup User Data Before Reimage"
+  hosts: "{{ target_hosts | default('lab') }}"
+  gather_facts: yes
+  vars:
+    # Required: pass -e "target_user=john"
+    target_user: "{{ target_user | mandatory }}"
+    backup_server_ip:   "{{ groups['backup_server'][0] }}"
+    backup_server_user: "backup_admin"
+    backup_base_path:   "/mnt/backups"
+    backup_dest:        "/var/backups/lab_backups"
+    backup_dest_win:    "C:\\BackupStorage"
+    # Optional extra folders: -e "extra_paths=['/home/john/myproject']"
+    extra_paths:        []
+
+  tasks:
+
+    # ── Linux ───────────────────────────────────────────────────────────────
+    - name: "[Linux] Build list of user data paths"
+      ansible.builtin.set_fact:
+        linux_user_paths:
+          - "/home/{{ target_user }}/Desktop"
+          - "/home/{{ target_user }}/Documents"
+          - "/home/{{ target_user }}/projects"
+          - "/home/{{ target_user }}/Downloads"
+      when: ansible_os_family != "Windows"
+
+    - name: "[Linux] Add any extra paths"
+      ansible.builtin.set_fact:
+        linux_user_paths: "{{ linux_user_paths + extra_paths }}"
+      when:
+        - ansible_os_family != "Windows"
+        - extra_paths | length > 0
+
+    - name: "[Linux] Check which user paths exist"
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: "{{ linux_user_paths }}"
+      register: linux_path_stat
+      when: ansible_os_family != "Windows"
+
+    - name: "[Linux] Back up each existing user folder"
+      ansible.builtin.include_tasks: ../primitives/create_backup.yml
+      vars:
+        backup_source: "{{ item.stat.path }}"
+      loop: "{{ linux_path_stat.results | selectattr('stat.exists', 'true') | list }}"
+      loop_control:
+        label: "{{ item.stat.path }}"
+      when: ansible_os_family != "Windows"
+
+    - name: "[Linux] Warn about missing paths"
+      ansible.builtin.debug:
+        msg: "⚠️  Path does not exist, skipping: {{ item.item }}"
+      loop: "{{ linux_path_stat.results | selectattr('stat.exists', 'false') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: ansible_os_family != "Windows"
+
+    # ── Windows ─────────────────────────────────────────────────────────────
+    - name: "[Windows] Build list of user data paths"
+      ansible.builtin.set_fact:
+        win_user_paths:
+          - "C:\\Users\\{{ target_user }}\\Desktop"
+          - "C:\\Users\\{{ target_user }}\\Documents"
+          - "C:\\Users\\{{ target_user }}\\Downloads"
+          - "C:\\Users\\{{ target_user }}\\projects"
+      when: ansible_os_family == "Windows"
+
+    - name: "[Windows] Add any extra paths"
+      ansible.builtin.set_fact:
+        win_user_paths: "{{ win_user_paths + extra_paths }}"
+      when:
+        - ansible_os_family == "Windows"
+        - extra_paths | length > 0
+
+    - name: "[Windows] Check which user paths exist"
+      ansible.windows.win_stat:
+        path: "{{ item }}"
+      loop: "{{ win_user_paths }}"
+      register: win_path_stat
+      when: ansible_os_family == "Windows"
+
+    - name: "[Windows] Back up each existing user folder"
+      ansible.builtin.include_tasks: ../primitives/create_backup.yml
+      vars:
+        backup_source: "{{ item.stat.path }}"
+        backup_dest:   "{{ backup_dest_win }}"
+      loop: "{{ win_path_stat.results | selectattr('stat.exists', 'true') | list }}"
+      loop_control:
+        label: "{{ item.stat.path }}"
+      when: ansible_os_family == "Windows"
+
+    - name: "[Windows] Warn about missing paths"
+      ansible.builtin.debug:
+        msg: "⚠️  Path does not exist, skipping: {{ item.item }}"
+      loop: "{{ win_path_stat.results | selectattr('stat.exists', 'false') | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: ansible_os_family == "Windows"
+
+    - name: "Summary"
+      ansible.builtin.debug:
+        msg: "✅ User data backup for '{{ target_user }}' completed on {{ inventory_hostname }}"

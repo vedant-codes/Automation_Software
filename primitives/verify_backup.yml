@@ -1,0 +1,136 @@
+# primitives/verify_backup.yml
+# ---------------------------------------------------------------------------
+# Primitive: verify_backup
+# Variables required:
+#   backup_id          - archive filename to verify
+#   backup_server_ip   - IP of central backup server
+#   backup_server_user - SSH user on backup server
+#   backup_base_path   - base path on backup server
+# ---------------------------------------------------------------------------
+
+- name: "[verify_backup] Derive meta filename"
+  ansible.builtin.set_fact:
+    verify_meta_name: "{{ backup_id | regex_replace('\\.tar\\.gz$|\\.zip$', '') }}.meta.json"
+    verify_staging_linux: "/tmp/verify_staging"
+    verify_staging_win:   "C:\\Temp\\verify_staging"
+
+# ── Linux ──────────────────────────────────────────────────────────────────
+- name: "[verify_backup][Linux] Create staging directory"
+  ansible.builtin.file:
+    path: "{{ verify_staging_linux }}"
+    state: directory
+    mode: '0755'
+  when: ansible_os_family != "Windows"
+
+- name: "[verify_backup][Linux] Download archive from backup server"
+  ansible.posix.synchronize:
+    src: "{{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ backup_id }}"
+    dest: "{{ verify_staging_linux }}/{{ backup_id }}"
+    mode: pull
+  when: ansible_os_family != "Windows"
+
+- name: "[verify_backup][Linux] Download metadata from backup server"
+  ansible.posix.synchronize:
+    src: "{{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ verify_meta_name }}"
+    dest: "{{ verify_staging_linux }}/{{ verify_meta_name }}"
+    mode: pull
+  when: ansible_os_family != "Windows"
+
+- name: "[verify_backup][Linux] Compute actual SHA256 of downloaded archive"
+  ansible.builtin.stat:
+    path: "{{ verify_staging_linux }}/{{ backup_id }}"
+    checksum_algorithm: sha256
+  when: ansible_os_family != "Windows"
+  register: actual_checksum_linux
+
+- name: "[verify_backup][Linux] Read stored checksum from metadata"
+  ansible.builtin.shell: |
+    python3 -c "
+    import json, sys
+    with open('{{ verify_staging_linux }}/{{ verify_meta_name }}') as f:
+        data = json.load(f)
+    print(data.get('checksum',''))
+    "
+  when: ansible_os_family != "Windows"
+  register: stored_checksum_linux
+  changed_when: false
+
+- name: "[verify_backup][Linux] PASS - Backup is valid"
+  ansible.builtin.debug:
+    msg: "✅ VALID: {{ backup_id }} — checksum matches ({{ actual_checksum_linux.stat.checksum }})"
+  when:
+    - ansible_os_family != "Windows"
+    - actual_checksum_linux.stat.checksum == stored_checksum_linux.stdout | trim
+
+- name: "[verify_backup][Linux] FAIL - Backup is CORRUPTED"
+  ansible.builtin.fail:
+    msg: |
+      ❌ CORRUPTED: {{ backup_id }}
+         Stored  : {{ stored_checksum_linux.stdout | trim }}
+         Actual  : {{ actual_checksum_linux.stat.checksum }}
+  when:
+    - ansible_os_family != "Windows"
+    - actual_checksum_linux.stat.checksum != stored_checksum_linux.stdout | trim
+
+- name: "[verify_backup][Linux] Cleanup staging"
+  ansible.builtin.file:
+    path: "{{ verify_staging_linux }}"
+    state: absent
+  when: ansible_os_family != "Windows"
+
+# ── Windows ────────────────────────────────────────────────────────────────
+- name: "[verify_backup][Windows] Create staging directory"
+  ansible.windows.win_file:
+    path: "{{ verify_staging_win }}"
+    state: directory
+  when: ansible_os_family == "Windows"
+
+- name: "[verify_backup][Windows] Download archive from backup server via SCP"
+  ansible.windows.win_shell: |
+    scp -o StrictHostKeyChecking=no `
+        {{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ backup_id }} `
+        "{{ verify_staging_win }}\{{ backup_id }}"
+  when: ansible_os_family == "Windows"
+
+- name: "[verify_backup][Windows] Download metadata via SCP"
+  ansible.windows.win_shell: |
+    scp -o StrictHostKeyChecking=no `
+        {{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ verify_meta_name }} `
+        "{{ verify_staging_win }}\{{ verify_meta_name }}"
+  when: ansible_os_family == "Windows"
+
+- name: "[verify_backup][Windows] Compute actual SHA256 with certutil"
+  ansible.windows.win_shell: |
+    (Get-FileHash "{{ verify_staging_win }}\{{ backup_id }}" -Algorithm SHA256).Hash
+  when: ansible_os_family == "Windows"
+  register: actual_checksum_win
+
+- name: "[verify_backup][Windows] Read stored checksum from metadata"
+  ansible.windows.win_shell: |
+    $meta = Get-Content "{{ verify_staging_win }}\{{ verify_meta_name }}" | ConvertFrom-Json
+    Write-Output $meta.checksum
+  when: ansible_os_family == "Windows"
+  register: stored_checksum_win
+
+- name: "[verify_backup][Windows] PASS - Backup is valid"
+  ansible.builtin.debug:
+    msg: "✅ VALID: {{ backup_id }} — checksum matches"
+  when:
+    - ansible_os_family == "Windows"
+    - actual_checksum_win.stdout | trim | upper == stored_checksum_win.stdout | trim | upper
+
+- name: "[verify_backup][Windows] FAIL - Backup is CORRUPTED"
+  ansible.builtin.fail:
+    msg: |
+      ❌ CORRUPTED: {{ backup_id }}
+         Stored : {{ stored_checksum_win.stdout | trim }}
+         Actual : {{ actual_checksum_win.stdout | trim }}
+  when:
+    - ansible_os_family == "Windows"
+    - actual_checksum_win.stdout | trim | upper != stored_checksum_win.stdout | trim | upper
+
+- name: "[verify_backup][Windows] Cleanup staging"
+  ansible.windows.win_file:
+    path: "{{ verify_staging_win }}"
+    state: absent
+  when: ansible_os_family == "Windows"
