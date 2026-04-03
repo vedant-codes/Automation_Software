@@ -1,0 +1,17 @@
+# primitives/remove_from_group.yml
+- name: Remove user from group
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Linux remove group
+      command: "gpasswd -d {{ user }} {{ group }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Windows remove group
+      win_group_membership:
+        name: "{{ group }}"
+        members:
+          - "{{ user }}"
+        state: absent
+      when: ansible_os_family == "Windows"
