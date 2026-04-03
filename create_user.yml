@@ -1,0 +1,18 @@
+# primitives/create_user.yml
+- name: Create user (multi OS)
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Create user on Linux
+      user:
+        name: "{{ user }}"
+        state: present
+      when: ansible_os_family != "Windows"
+
+    - name: Create user on Windows
+      win_user:
+        name: "{{ user }}"
+        password: "Temp@123"
+        state: present
+      when: ansible_os_family == "Windows"

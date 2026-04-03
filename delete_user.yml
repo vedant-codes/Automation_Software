@@ -1,0 +1,17 @@
+# primitives/delete_user.yml
+- name: Delete user
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Delete user on Linux
+      user:
+        name: "{{ user }}"
+        state: absent
+      when: ansible_os_family != "Windows"
+
+    - name: Delete user on Windows
+      win_user:
+        name: "{{ user }}"
+        state: absent
+      when: ansible_os_family == "Windows"
