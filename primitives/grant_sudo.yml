@@ -1,7 +1,6 @@
-# primitives/grant_sudo.yml
 - name: Grant admin privileges
   hosts: all
-  become: yes
+  
 
   tasks:
     - name: Linux sudo access
@@ -9,7 +8,9 @@
         path: "/etc/sudoers.d/{{ user }}"
         line: "{{ user }} ALL=(ALL) NOPASSWD: ALL"
         create: yes
+        mode: '0440'
         validate: "visudo -cf %s"
+      become: yes  # Only trigger sudo on Linux
       when: ansible_os_family != "Windows"
 
     - name: Windows admin access
@@ -18,4 +19,5 @@
         members:
           - "{{ user }}"
         state: present
+      # No become needed for Windows; your winrm user is already an Admin
       when: ansible_os_family == "Windows"
