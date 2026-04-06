@@ -1,17 +1,18 @@
-# primitives/delete_user.yml
 - name: Delete user
   hosts: all
-  become: yes
+  # Remove 'become: yes' from the top level
 
   tasks:
     - name: Delete user on Linux
       user:
         name: "{{ user }}"
         state: absent
+      become: yes  # Only sudo on Linux
       when: ansible_os_family != "Windows"
 
     - name: Delete user on Windows
       win_user:
         name: "{{ user }}"
         state: absent
+      # No 'become' needed because your winrm user is already an Admin
       when: ansible_os_family == "Windows"
