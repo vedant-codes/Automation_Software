@@ -1,14 +1,16 @@
-# primitives/unlock_user.yml
 - name: Unlock user
   hosts: all
-  become: yes
+  # REMOVED become: yes from here
 
   tasks:
-    - name: Linux unlock
-      command: "passwd -u {{ user }}"
+    - name: Linux unlock account
+      user:
+        name: "{{ user }}"
+        password_lock: no
+      become: yes  # Trigger sudo only for the Linux task
       when: ansible_os_family != "Windows"
 
-    - name: Windows enable user
+    - name: Windows enable user account
       win_user:
         name: "{{ user }}"
         account_disabled: no
