@@ -1,21 +1,21 @@
-# primitives/grant_sudo.yml
-- name: Grant admin privileges
+- name: Revoke admin privileges
   hosts: all
-  become: yes
+  # No top-level 'become' to keep Windows happy
 
   tasks:
-    - name: Linux sudo access
-      lineinfile:
+    # --- Linux: Remove the custom sudoers file ---
+    - name: Linux revoke sudo access
+      file:
         path: "/etc/sudoers.d/{{ user }}"
-        line: "{{ user }} ALL=(ALL) NOPASSWD: ALL"
-        create: yes
-        validate: "visudo -cf %s"
+        state: absent
+      become: yes
       when: ansible_os_family != "Windows"
 
-    - name: Windows admin access
+    # --- Windows: Remove user from Administrators group ---
+    - name: Windows revoke admin access
       win_group_membership:
         name: Administrators
         members:
           - "{{ user }}"
-        state: present
+        state: absent
       when: ansible_os_family == "Windows"
