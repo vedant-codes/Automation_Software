@@ -1,7 +1,5 @@
-# primitives/add_to_group.yml
 - name: Add user to group
   hosts: all
-  become: yes
 
   tasks:
     - name: Linux group add
@@ -9,9 +7,18 @@
         name: "{{ user }}"
         groups: "{{ group }}"
         append: yes
+      become: yes
       when: ansible_os_family != "Windows"
 
-    - name: Windows group add
+    # --- Windows Specific Tasks ---
+    
+    - name: Ensure Windows group exists
+      win_group:
+        name: "{{ group }}"
+        state: present
+      when: ansible_os_family == "Windows"
+
+    - name: Windows group add member
       win_group_membership:
         name: "{{ group }}"
         members:
