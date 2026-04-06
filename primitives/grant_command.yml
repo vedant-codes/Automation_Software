@@ -1,0 +1,25 @@
+- name: Grant Command Permissions
+  hosts: all
+  # No top-level 'become' to keep Windows happy
+
+  tasks:
+    # --- Linux: Add a specific rule to sudoers ---
+    - name: Linux grant sudo for specific command
+      lineinfile:
+        path: /etc/sudoers.d/{{ user }}_commands
+        line: "{{ user }} ALL=(ALL) NOPASSWD: {{ command_path }}"
+        create: yes
+        mode: '0440'
+        validate: 'visudo -cf %s'
+      become: yes
+      when: ansible_os_family != "Windows"
+
+    # --- Windows: Grant 'Execute' permissions on a file/folder ---
+    - name: Windows grant execute permission
+      win_acl:
+        path: "{{ command_path }}"
+        user: "{{ user }}"
+        rights: ReadAndExecute
+        type: allow
+        state: present
+      when: ansible_os_family == "Windows"
