@@ -1,14 +1,16 @@
-# primitives/lock_user.yml
 - name: Lock user
   hosts: all
-  become: yes
+  # REMOVED become: yes from here
 
   tasks:
-    - name: Linux lock
-      command: "passwd -l {{ user }}"
+    - name: Linux lock account
+      user:
+        name: "{{ user }}"
+        password_lock: yes
+      become: yes  # Only use sudo on Linux
       when: ansible_os_family != "Windows"
 
-    - name: Windows disable user
+    - name: Windows disable user account
       win_user:
         name: "{{ user }}"
         account_disabled: yes
