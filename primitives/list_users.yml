@@ -1,22 +1,26 @@
-# primitives/list_users.yml
 - name: List users
   hosts: all
 
   tasks:
+    # --- Linux Side ---
     - name: Linux users
       command: "cut -d: -f1 /etc/passwd"
       register: users_linux
       when: ansible_os_family != "Windows"
 
-    - debug:
-        var: users_linux.stdout_lines
+    - name: Display Linux Users
+      debug:
+        msg: "{{ users_linux.stdout_lines }}"
       when: ansible_os_family != "Windows"
 
+    # --- Windows Side ---
     - name: Windows users
-      win_command: "net user"
+      # Using PowerShell to get a clean list of names only
+      win_shell: "Get-LocalUser | Select-Object -ExpandProperty Name"
       register: users_win
       when: ansible_os_family == "Windows"
 
-    - debug:
-        var: users_win.stdout_lines
+    - name: Display Windows Users
+      debug:
+        msg: "{{ users_win.stdout_lines }}"
       when: ansible_os_family == "Windows"
