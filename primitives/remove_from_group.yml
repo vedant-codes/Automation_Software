@@ -1,17 +1,21 @@
-# primitives/remove_from_group.yml
 - name: Remove user from group
   hosts: all
-  become: yes
+  # REMOVED 'become: yes' from here to prevent Windows facts failure
 
   tasks:
-    - name: Linux remove group
-      command: "gpasswd -d {{ user }} {{ group }}"
+    - name: Linux remove user from group
+      user:
+        name: "{{ user }}"
+        groups: "{{ group }}"
+        state: present
+        remove_subgroups: yes # This ensures the user is removed from specified group
+      become: yes             # Only sudo on Linux
       when: ansible_os_family != "Windows"
 
-    - name: Windows remove group
+    - name: Windows remove user from group
       win_group_membership:
         name: "{{ group }}"
         members:
           - "{{ user }}"
-        state: absent
+        state: absent         # 'absent' removes the member from the group
       when: ansible_os_family == "Windows"
