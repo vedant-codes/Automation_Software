@@ -34,6 +34,7 @@ def main():
     sub.add_parser("user",    help="User management operations",     add_help=False)
     sub.add_parser("network", help="Network & connectivity checks",  add_help=False)
     sub.add_parser("log",     help="Log collection & auditing",      add_help=False)
+    sub.add_parser("provision", help="Machine provisioning", add_help=False)
 
     # Parse just the domain arg, pass the rest to the child controller
     args, remaining = parser.parse_known_args()
@@ -66,6 +67,10 @@ def main():
     elif args.domain == "log":
         # TODO: teammate imports log_controller here
         print("[main] log controller — not yet wired in")
+    
+    elif args.domain == "provision":
+        from controllers.provision_controller import menu
+        menu()
 
     else:
         parser.print_help()

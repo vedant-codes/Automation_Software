@@ -1,0 +1,41 @@
+- name: Provision New Machine
+  hosts: "{{ target_hosts }}"
+  become: yes
+
+  tasks:
+
+    - name: Install base packages
+      include_tasks: ../primitives/install_package.yml
+      vars:
+        package_name: "vim"
+
+    - name: Create group
+      include_tasks: ../primitives/create_group.yml
+      vars:
+        group: "{{ group }}"
+
+    - name: Create user
+      include_tasks: ../primitives/create_user.yml
+      vars:
+        user: "{{ user }}"
+
+    - name: Add user to group
+      include_tasks: ../primitives/add_to_group.yml
+      vars:
+        user: "{{ user }}"
+        group: "{{ group }}"
+
+    - name: Set hostname
+      hostname:
+        name: "{{ hostname }}"
+
+    - name: Configure DNS
+      include_tasks: ../primitives/configure_network.yml
+      vars:
+        dns_server: "{{ dns_server }}"
+
+    - name: Deploy config file
+      include_tasks: ../primitives/copy_file.yml
+      vars:
+        src: "/etc/hosts"
+        dest: "/tmp/hosts_backup"

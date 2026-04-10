@@ -1,0 +1,5 @@
+- name: Copy file
+  copy:
+    src: "{{ src }}"
+    dest: "{{ dest }}"
+    remote_src: yes

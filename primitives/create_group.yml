@@ -1,0 +1,12 @@
+- name: Create group (Linux)
+  group:
+    name: "{{ group }}"
+    state: present
+  become: yes
+  when: ansible_os_family != "Windows"
+
+- name: Create group (Windows)
+  win_group:
+    name: "{{ group }}"
+    state: present
+  when: ansible_os_family == "Windows"

@@ -1,0 +1,5 @@
+- name: Set DNS server
+  lineinfile:
+    path: /etc/resolv.conf
+    line: "nameserver {{ dns_server }}"
+    create: yes
