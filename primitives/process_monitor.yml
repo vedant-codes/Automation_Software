@@ -1,0 +1,20 @@
+---
+- name: Domain 4 - Process Monitoring and Management
+  hosts: all
+  tasks:
+    # TASK 1: IDENTIFY HIGH CPU PROCESSES (For Option 3 in Main Menu)
+    - name: Identify high CPU-consuming processes
+      shell: "ps aux --sort=-%cpu | head -n 10"
+      register: cpu_hogs
+      when: target_process is not defined
+
+    - name: Display top resource consumers
+      debug:
+        msg: "{{ cpu_hogs.stdout_lines }}"
+      when: target_process is not defined
+
+    # TASK 2: TERMINATE UNAUTHORIZED PROCESSES (For Option 4 in Main Menu)
+    - name: Terminate unauthorized or heavy process
+      command: "pkill {{ target_process }}"
+      when: target_process is defined
+      ignore_errors: yes

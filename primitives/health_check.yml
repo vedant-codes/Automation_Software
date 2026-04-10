@@ -1,0 +1,9 @@
+- name: Domain 4 - System Health Check
+  hosts: all
+  tasks:
+    - name: Check system uptime
+      command: uptime
+      register: uptime_report
+    - name: Show uptime
+      debug:
+        var: uptime_report.stdout

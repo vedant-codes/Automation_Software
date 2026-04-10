@@ -1,0 +1,9 @@
+- name: Domain 4 - Check Memory Usage
+  hosts: all
+  tasks:
+    - name: Run free -m command
+      command: free -m
+      register: mem_report
+    - name: Show the output
+      debug:
+        msg: "{{ mem_report.stdout_lines }}"

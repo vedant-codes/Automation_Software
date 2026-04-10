@@ -1,0 +1,9 @@
+- name: Domain 4 - Check Disk Usage
+  hosts: all
+  tasks:
+    - name: Run df -h command
+      command: df -h
+      register: disk_report
+    - name: Show the output
+      debug:
+        msg: "{{ disk_report.stdout_lines }}"
