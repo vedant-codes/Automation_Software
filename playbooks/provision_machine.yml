@@ -4,11 +4,17 @@
 
   tasks:
 
+    # ─────────────────────────────
+    # STEP 1 — SOFTWARE
+    # ─────────────────────────────
     - name: Install base packages
       include_tasks: ../primitives/install_package.yml
       vars:
         package_name: "vim"
 
+    # ─────────────────────────────
+    # STEP 2 — IDENTITY
+    # ─────────────────────────────
     - name: Create group
       include_tasks: ../primitives/create_group.yml
       vars:
@@ -25,17 +31,45 @@
         user: "{{ user }}"
         group: "{{ group }}"
 
-    - name: Set hostname
+    # ─────────────────────────────
+    # STEP 3 — NETWORK (SAFE)
+    # ─────────────────────────────
+    - name: Set hostname (optional + safe)
       hostname:
         name: "{{ hostname }}"
+      when:
+        - hostname is defined
+        - hostname != ""
+        - inventory_hostname != "localhost"
+        - not safe_mode | default(true)
 
-    - name: Configure DNS
+    - name: Configure DNS (optional)
       include_tasks: ../primitives/configure_network.yml
       vars:
         dns_server: "{{ dns_server }}"
+      when: not safe_mode | default(true)
 
+    # ─────────────────────────────
+    # STEP 4 — CONFIG
+    # ─────────────────────────────
     - name: Deploy config file
       include_tasks: ../primitives/copy_file.yml
       vars:
         src: "/etc/hosts"
         dest: "/tmp/hosts_backup"
+
+    - name: Modify config file (optional)
+      include_tasks: ../primitives/modify_file.yml
+      vars:
+        file_path: "/tmp/test_config"
+        content: "configured=true"
+        modify_file_flag: "{{ modify_file_flag | default(false) }}"
+
+    # ─────────────────────────────
+    # STEP 5 — BASELINE COMMAND
+    # ─────────────────────────────
+    - name: Run baseline command (optional)
+      include_tasks: ../primitives/run_command.yml
+      vars:
+        cmd: "echo Provisioning done on $(hostname)"
+        run_cmd: "{{ run_cmd | default(false) }}"

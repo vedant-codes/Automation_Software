@@ -1,0 +1,9 @@
+- name: Run command (optional)
+  command: "{{ cmd }}"
+  register: cmd_output
+  when: run_cmd | default(false)
+
+- name: Show command output
+  debug:
+    var: cmd_output.stdout
+  when: run_cmd | default(false)

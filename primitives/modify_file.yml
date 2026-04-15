@@ -1,0 +1,6 @@
+- name: Modify file (optional)
+  lineinfile:
+    path: "{{ file_path }}"
+    line: "{{ content }}"
+    create: yes
+  when: modify_file_flag | default(false)
