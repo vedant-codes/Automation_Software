@@ -1,65 +1,80 @@
 ---
 # playbooks/verify_backups.yml
-# ---------------------------------------------------------------------------
-# Task 4: Verify Backup Integrity
-# Problem: Backups might get corrupted due to storage issues.
-# Solution: Validate every backup using checksum comparison.
-# Linux Tool : sha256sum (via stat module)
-# Windows Tool: certutil / Get-FileHash
-# ---------------------------------------------------------------------------
 
 - name: "Verify All Backup Integrity"
   hosts: "{{ target_hosts | default('lab') }}"
   gather_facts: yes
   vars:
-    backup_server_ip:   "{{ groups['backup_server'][0] }}"
-    backup_server_user: "backup_admin"
-    backup_base_path:   "/mnt/backups"
-    filter_machine:     "{{ target_machine | default(inventory_hostname) }}"
+    backup_storage: "C:\\BackupStorage"
 
   tasks:
 
-    - name: "List all backup IDs for this machine on backup server"
-      ansible.builtin.shell: |
-        ssh -o StrictHostKeyChecking=no \
-            {{ backup_server_user }}@{{ backup_server_ip }} \
-            "ls {{ backup_base_path }}/{{ filter_machine }}/*.tar.gz \
-                 {{ backup_base_path }}/{{ filter_machine }}/*.zip \
-                 2>/dev/null || echo NONE"
-      delegate_to: localhost
-      register: backup_file_list
+    - name: "[Windows] List all zip files in BackupStorage"
+      ansible.windows.win_shell: |
+        $files = Get-ChildItem "C:\BackupStorage" -Filter "*.zip" -ErrorAction SilentlyContinue
+        if ($files) {
+          $files | ForEach-Object { Write-Output $_.Name }
+        } else {
+          Write-Output "NONE"
+        }
+      when: ansible_os_family == "Windows"
+      register: win_backup_list
       changed_when: false
 
-    - name: "Set backup IDs list"
-      ansible.builtin.set_fact:
-        backup_ids_to_verify: >-
-          {{
-            backup_file_list.stdout_lines
-            | reject('equalto', 'NONE')
-            | map('basename')
-            | list
-          }}
-
-    - name: "Report when no backups found"
+    - name: "[Windows] Report no backups found"
       ansible.builtin.debug:
-        msg: "No backups to verify for machine: {{ filter_machine }}"
-      when: backup_ids_to_verify | length == 0
+        msg: "No backups found in C:\\BackupStorage"
+      when:
+        - ansible_os_family == "Windows"
+        - win_backup_list.stdout | trim == "NONE"
 
-    - name: "Verify each backup"
-      ansible.builtin.include_tasks: ../primitives/verify_backup.yml
-      vars:
-        backup_id: "{{ item }}"
-      loop: "{{ backup_ids_to_verify }}"
-      loop_control:
-        label: "{{ item }}"
-      when: backup_ids_to_verify | length > 0
-      # ignore_errors so a corrupted backup doesn't stop the rest
-      ignore_errors: yes
+    - name: "[Windows] Verify each backup checksum"
+      ansible.windows.win_shell: |
+        $backupName = "{{ item }}"
+        $zipPath = "C:\BackupStorage\$backupName"
+        $metaName = $backupName -replace '\.zip$', '.meta.json'
+        $metaPath = "C:\BackupStorage\$metaName"
+        if (-not (Test-Path $zipPath)) {
+          Write-Output "ERROR: zip not found"
+          exit 1
+        }
+        if (-not (Test-Path $metaPath)) {
+          Write-Output "ERROR: meta not found"
+          exit 1
+        }
+        $actualHash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToUpper()
+        $metaRaw = Get-Content $metaPath -Raw
+        $storedHash = ([regex]::Match($metaRaw, '"checksum"\s*:\s*"([^"]+)"')).Groups[1].Value.ToUpper()
+        if ($actualHash -eq $storedHash) {
+          Write-Output "VALID: $backupName checksum matches ($actualHash)"
+        } else {
+          Write-Output "CORRUPTED: $backupName stored=$storedHash actual=$actualHash"
+          exit 1
+        }
+      loop: >-
+        {{
+          win_backup_list.stdout_lines
+          | reject('equalto', 'NONE')
+          | reject('equalto', '')
+          | list
+        }}
       register: verify_results
+      when:
+        - ansible_os_family == "Windows"
+        - win_backup_list.stdout | trim != "NONE"
+      changed_when: false
+
+    - name: "[Windows] Show verification results"
+      ansible.builtin.debug:
+        msg: "{{ item.stdout }}"
+      loop: "{{ verify_results.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - ansible_os_family == "Windows"
+        - verify_results is defined
 
     - name: "Verification Summary"
       ansible.builtin.debug:
-        msg: >-
-          Verified {{ backup_ids_to_verify | length }} backup(s) for {{ filter_machine }}.
-          Check individual task results above for VALID / CORRUPTED status.
-      when: backup_ids_to_verify | length > 0
+        msg: "Verified {{ verify_results.results | default([]) | length }} backup(s) on {{ inventory_hostname }}"
+      when: verify_results is defined
