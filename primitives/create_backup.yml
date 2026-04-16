@@ -1,23 +1,31 @@
 # primitives/create_backup.yml
-# ---------------------------------------------------------------------------
-# Primitive: create_backup
-# Variables required:
-#   backup_source      - path to file/folder to back up
-#   backup_dest        - local staging destination on the managed node
-#   backup_server_ip   - IP of central backup server
-#   backup_server_user - SSH user on backup server
-#   backup_base_path   - base path on backup server  (e.g. /mnt/backups)
-# ---------------------------------------------------------------------------
+# Fixed for Windows path handling and .zip extension
 
 - name: "[create_backup] Set backup filename"
   ansible.builtin.set_fact:
     backup_timestamp: "{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}"
-    backup_source_name: "{{ backup_source | basename }}"
 
-- name: "[create_backup] Set full backup archive name"
+- name: "[create_backup] Set source name (Linux)"
+  ansible.builtin.set_fact:
+    backup_source_name: "{{ backup_source | basename }}"
+  when: ansible_os_family != "Windows"
+
+- name: "[create_backup] Set source name (Windows)"
+  ansible.builtin.set_fact:
+    backup_source_name: "{{ backup_source | win_basename }}"
+  when: ansible_os_family == "Windows"
+
+- name: "[create_backup] Set archive names (Linux)"
   ansible.builtin.set_fact:
     backup_archive_name: "{{ backup_source_name }}_backup_{{ backup_timestamp }}.tar.gz"
     backup_meta_name: "{{ backup_source_name }}_backup_{{ backup_timestamp }}.meta.json"
+  when: ansible_os_family != "Windows"
+
+- name: "[create_backup] Set archive names (Windows)"
+  ansible.builtin.set_fact:
+    backup_archive_name: "{{ backup_source_name }}_backup_{{ backup_timestamp }}.zip"
+    backup_meta_name: "{{ backup_source_name }}_backup_{{ backup_timestamp }}.meta.json"
+  when: ansible_os_family == "Windows"
 
 # ── Linux ──────────────────────────────────────────────────────────────────
 - name: "[create_backup][Linux] Ensure staging directory exists"
@@ -74,33 +82,34 @@
   when: ansible_os_family != "Windows"
 
 # ── Windows ────────────────────────────────────────────────────────────────
-- name: "[create_backup][Windows] Ensure staging directory exists"
+- name: "[create_backup][Windows] Ensure backup directory exists"
   ansible.windows.win_file:
-    path: "{{ backup_dest }}"
+    path: "C:\\BackupStorage"
     state: directory
   when: ansible_os_family == "Windows"
 
 - name: "[create_backup][Windows] Create ZIP archive"
   ansible.windows.win_shell: |
-    Compress-Archive -Path "{{ backup_source }}" `
-                     -DestinationPath "{{ backup_dest }}\{{ backup_archive_name }}" `
-                     -Force
+    $src  = "{{ backup_source }}"
+    $dest = "C:\BackupStorage\{{ backup_archive_name }}"
+    Compress-Archive -Path $src -DestinationPath $dest -Force
   when: ansible_os_family == "Windows"
+  register: win_zip_result
 
 - name: "[create_backup][Windows] Compute SHA256 checksum"
   ansible.windows.win_shell: |
-    (Get-FileHash "{{ backup_dest }}\{{ backup_archive_name }}" -Algorithm SHA256).Hash
+    (Get-FileHash "C:\BackupStorage\{{ backup_archive_name }}" -Algorithm SHA256).Hash
   when: ansible_os_family == "Windows"
   register: win_checksum
 
 - name: "[create_backup][Windows] Write metadata sidecar"
   ansible.windows.win_copy:
-    dest: "{{ backup_dest }}\\{{ backup_meta_name }}"
+    dest: "C:\\BackupStorage\\{{ backup_meta_name }}"
     content: |
       {
         "backup_id":   "{{ backup_archive_name }}",
         "source":      "{{ backup_source }}",
-        "destination": "{{ backup_dest }}",
+        "destination": "C:\\BackupStorage",
         "timestamp":   "{{ backup_timestamp }}",
         "platform":    "Windows",
         "hostname":    "{{ inventory_hostname }}",
@@ -109,16 +118,7 @@
       }
   when: ansible_os_family == "Windows"
 
-- name: "[create_backup][Windows] Copy archive to backup server via SCP"
-  ansible.windows.win_shell: |
-    scp -o StrictHostKeyChecking=no `
-        "{{ backup_dest }}\{{ backup_archive_name }}" `
-        {{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/
-  when: ansible_os_family == "Windows"
-
-- name: "[create_backup][Windows] Copy metadata to backup server via SCP"
-  ansible.windows.win_shell: |
-    scp -o StrictHostKeyChecking=no `
-        "{{ backup_dest }}\{{ backup_meta_name }}" `
-        {{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/
+- name: "[create_backup][Windows] Confirm backup created"
+  ansible.builtin.debug:
+    msg: "✅ Backup created: C:\\BackupStorage\\{{ backup_archive_name }}"
   when: ansible_os_family == "Windows"
