@@ -69,7 +69,6 @@
         win_user_paths:
           - "C:\\Users\\{{ target_user }}\\Desktop"
           - "C:\\Users\\{{ target_user }}\\Documents"
-          - "C:\\Users\\{{ target_user }}\\Downloads"
           - "C:\\Users\\{{ target_user }}\\projects"
       when: ansible_os_family == "Windows"
 
