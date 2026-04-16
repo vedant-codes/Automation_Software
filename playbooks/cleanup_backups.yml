@@ -1,65 +1,76 @@
 ---
 # playbooks/cleanup_backups.yml
-# ---------------------------------------------------------------------------
-# Task 6: Manage Backup Storage
-# Problem: Backup storage server fills up over time.
-# Solution: List all backups, keep N newest per source, delete the rest.
-# ---------------------------------------------------------------------------
+# Cleans up old backups from C:\BackupStorage on Windows
+# Keeps the N most recent zip+meta pairs, deletes the rest
 
 - name: "Cleanup Old Backups"
-  hosts: localhost
-  gather_facts: no
+  hosts: "{{ target_hosts | default('lab') }}"
+  gather_facts: yes
   vars:
-    backup_server_ip:   "{{ groups['backup_server'][0] }}"
-    backup_server_user: "backup_admin"
-    backup_base_path:   "/mnt/backups"
-    keep_latest:        5              # keep 5 most recent per machine; override with -e
-    # target one machine or 'all':  -e "cleanup_machine=linux-pc-01"
-    cleanup_machine:    "all"
+    backup_storage: "C:\\BackupStorage"
+    keep_latest: 5
 
   tasks:
 
-    - name: "Determine which machine directories to clean"
-      ansible.builtin.shell: |
-        ssh -o StrictHostKeyChecking=no \
-            {{ backup_server_user }}@{{ backup_server_ip }} \
-            "ls -d {{ backup_base_path }}/{{ cleanup_machine if cleanup_machine != 'all' else '*' }}/ 2>/dev/null"
-      register: machine_dirs
+    - name: "[Windows] List all zip files sorted newest first"
+      ansible.windows.win_shell: |
+        $files = Get-ChildItem "C:\BackupStorage" -Filter "*.zip" -ErrorAction SilentlyContinue |
+                 Sort-Object LastWriteTime -Descending
+        if ($files) {
+          $files | ForEach-Object { Write-Output $_.Name }
+        } else {
+          Write-Output "NONE"
+        }
+      when: ansible_os_family == "Windows"
+      register: win_backup_list
       changed_when: false
 
-    - name: "For each machine directory, identify and prune old backups"
-      ansible.builtin.shell: |
-        # List all .meta.json files sorted newest-first by filename (timestamp is in name)
-        ssh -o StrictHostKeyChecking=no \
-            {{ backup_server_user }}@{{ backup_server_ip }} \
-            "ls -t {{ item }}*.tar.gz {{ item }}*.zip 2>/dev/null | tail -n +{{ (keep_latest | int) + 1 }}"
-      loop: "{{ machine_dirs.stdout_lines }}"
-      register: old_backups_per_machine
-      changed_when: false
-
-    - name: "Delete identified old archives"
-      ansible.builtin.shell: |
-        ssh -o StrictHostKeyChecking=no \
-            {{ backup_server_user }}@{{ backup_server_ip }} \
-            "rm -f {{ item.1 }} {{ item.1 | regex_replace('\\.tar\\.gz$|\\.zip$', '') }}.meta.json"
-      loop: >-
-        {{
-          old_backups_per_machine.results
-          | subelements('stdout_lines', skip_missing=True)
-        }}
-      loop_control:
-        label: "{{ item.1 | basename }}"
-      when: item.1 | length > 0
-      register: delete_results
-
-    - name: "Count deleted files"
-      ansible.builtin.set_fact:
-        deleted_count: "{{ delete_results.results | selectattr('changed', 'true') | list | length }}"
-      when: delete_results is defined
-
-    - name: "Cleanup Summary"
+    - name: "[Windows] Report no backups found"
       ansible.builtin.debug:
-        msg: >-
-          🧹 Cleanup complete.
-          Kept latest {{ keep_latest }} backups per machine.
-          Removed {{ deleted_count | default(0) }} old backup(s).
+        msg: "No backups found in C:\\BackupStorage — nothing to clean"
+      when:
+        - ansible_os_family == "Windows"
+        - win_backup_list.stdout | trim == "NONE"
+
+    - name: "[Windows] Show all backups found"
+      ansible.builtin.debug:
+        msg: "Found {{ win_backup_list.stdout_lines | reject('equalto','NONE') | reject('equalto','') | list | length }} backup(s) — keeping {{ keep_latest }} most recent"
+      when:
+        - ansible_os_family == "Windows"
+        - win_backup_list.stdout | trim != "NONE"
+
+    - name: "[Windows] Delete old backups beyond keep_latest"
+      ansible.windows.win_shell: |
+        $files = Get-ChildItem "C:\BackupStorage" -Filter "*.zip" -ErrorAction SilentlyContinue |
+                 Sort-Object LastWriteTime -Descending
+        $keepCount = {{ keep_latest }}
+        if ($files.Count -le $keepCount) {
+          Write-Output "Nothing to delete — only $($files.Count) backup(s) exist, keeping $keepCount"
+          exit 0
+        }
+        $toDelete = $files | Select-Object -Skip $keepCount
+        $deletedCount = 0
+        foreach ($file in $toDelete) {
+          $metaName = $file.Name -replace '\.zip$', '.meta.json'
+          $metaPath = "C:\BackupStorage\$metaName"
+          Remove-Item $file.FullName -Force
+          Write-Output "Deleted: $($file.Name)"
+          if (Test-Path $metaPath) {
+            Remove-Item $metaPath -Force
+            Write-Output "Deleted: $metaName"
+          }
+          $deletedCount++
+        }
+        Write-Output "Cleanup complete — deleted $deletedCount old backup(s), kept $keepCount"
+      when:
+        - ansible_os_family == "Windows"
+        - win_backup_list.stdout | trim != "NONE"
+      register: cleanup_result
+
+    - name: "[Windows] Show cleanup result"
+      ansible.builtin.debug:
+        msg: "{{ cleanup_result.stdout_lines }}"
+      when:
+        - ansible_os_family == "Windows"
+        - cleanup_result is defined
+        - cleanup_result.stdout is defined
