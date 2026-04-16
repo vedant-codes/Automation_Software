@@ -1,9 +1,28 @@
 - name: Domain 4 - Check Disk Usage
   hosts: all
+  # We do NOT use 'become: yes' here to avoid the Windows "Privilege Escalation Deadlock" [cite: 973, 975]
+  
   tasks:
-    - name: Run df -h command
+    # --- Linux Execution Path ---
+    - [cite_start]name: Run df -h command (Linux) [cite: 426]
       command: df -h
-      register: disk_report
-    - name: Show the output
+      register: linux_disk
+      when: ansible_os_family != "Windows"
+
+    # --- Windows Execution Path ---
+    # Replaces manual Task Manager usage with automated PowerShell [cite: 424, 680]
+    - name: Run disk check (Windows)
+      win_shell: Get-Volume | Select-Object DriveLetter, FriendlyName, @{Name="SizeGB";Expression={$_.Size/1GB}}, @{Name="FreeGB";Expression={$_.SizeRemaining/1GB}}
+      register: windows_disk
+      when: ansible_os_family == "Windows"
+
+    # --- Unified Output Layer ---
+    - name: Show the output (Linux)
       debug:
-        msg: "{{ disk_report.stdout_lines }}"
+        msg: "{{ linux_disk.stdout_lines }}"
+      when: ansible_os_family != "Windows"
+
+    - name: Show the output (Windows)
+      debug:
+        msg: "{{ windows_disk.stdout_lines }}"
+      when: ansible_os_family == "Windows"

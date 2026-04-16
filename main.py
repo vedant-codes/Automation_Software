@@ -4,7 +4,7 @@ Routes CLI commands to the correct domain controller.
 
 Usage:
     python main.py backup [action]
-    python main.py monitor [vitals | health | process | kill <process_name>]
+    python main.py monitor [vitals | health | process | kill <process_name>] [--target <host>]
     python main.py provision
     python main.py user [action]
 """
@@ -20,7 +20,6 @@ def main():
     sub = parser.add_subparsers(dest="domain", help="Domain to operate on")
 
     # ── Domain Parsers ──────────────────────────────────────────────────────
-    # Using add_help=False because child controllers handle their own help
     sub.add_parser("backup",    help="Backup & Recovery operations",   add_help=False)
     sub.add_parser("monitor",   help="System monitoring & health",     add_help=False)
     sub.add_parser("provision", help="Machine provisioning",           add_help=False)
@@ -34,7 +33,6 @@ def main():
     # ── Routing Logic ───────────────────────────────────────────────────────
 
     if args.domain == "backup":
-        # Re-using the logic from your repository for the backup domain
         sys.argv = ["backup_controller"] + remaining
         import controllers.backup_controller as bc
         bc.__name__ = "__main__"
@@ -48,25 +46,35 @@ def main():
             print(f"[Error] Failed to execute backup controller: {e}")
 
     elif args.domain == "monitor":
-        # Integrating your new monitoring_controller.py
         import controllers.monitoring_controller as mc
         
+        # --- NEW LOGIC: Extract Target ---
+        target_host = "all"  # Default to all machines
+        if "--target" in remaining:
+            idx = remaining.index("--target")
+            if idx + 1 < len(remaining):
+                target_host = remaining[idx + 1]
+                # Remove them from 'remaining' so they don't break the 'action' index
+                remaining.pop(idx + 1)
+                remaining.pop(idx)
+
         if not remaining:
-            print("\nUsage: python main.py monitor <action>")
+            print("\nUsage: python main.py monitor <action> [--target <host>]")
             print("Actions: vitals, health, process, kill <process_name>")
             return
 
         action = remaining[0]
         
+        # Pass target_host to each function
         if action == "vitals":
-            mc.check_system_vitals()
+            mc.check_system_vitals(target=target_host)
         elif action == "health":
-            mc.perform_health_check()
+            mc.perform_health_check(target=target_host)
         elif action == "process":
-            mc.monitor_processes()
+            mc.monitor_processes(target=target_host)
         elif action == "kill":
             if len(remaining) > 1:
-                mc.kill_heavy_processes(remaining[1])
+                mc.kill_heavy_processes(remaining[1], target=target_host)
             else:
                 print("Error: Please specify a process name to kill.")
         else:
@@ -77,7 +85,6 @@ def main():
         menu()
 
     elif args.domain == "user":
-        # Placeholder for teammate's user_controller
         print("[main] User controller delegation...")
         sys.argv = ["user_controller"] + remaining
         from controllers import user_controller

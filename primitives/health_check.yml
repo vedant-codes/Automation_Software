@@ -1,9 +1,38 @@
 - name: Domain 4 - System Health Check
   hosts: all
+  # Connection is handled dynamically (SSH for Linux, WinRM for Windows) [cite: 69]
+
   tasks:
-    - name: Check system uptime
+    # --- Task 4.3: Network Reachability (The Heartbeat) ---
+    - name: Verify Linux Reachability (SSH)
+      ping:
+      when: ansible_os_family != "Windows"
+
+    - name: Verify Windows Reachability (WinRM)
+      win_ping:
+      when: ansible_os_family == "Windows"
+
+    # --- Task 4.3: Uptime & Load Analysis ---
+    - name: Check system uptime (Linux)
       command: uptime
-      register: uptime_report
-    - name: Show uptime
+      register: linux_uptime
+      when: ansible_os_family != "Windows"
+
+    - name: Check system uptime (Windows)
+      win_shell: |
+        $os = Get-CimInstance Win32_OperatingSystem
+        $uptime = (Get-Date) - $os.LastBootUpTime
+        echo "Uptime: $($uptime.Days) days, $($uptime.Hours) hours, $($uptime.Minutes) minutes"
+      register: windows_uptime
+      when: ansible_os_family == "Windows"
+
+    # --- Unified Reporting Layer ---
+    - name: Show Linux Uptime
       debug:
-        var: uptime_report.stdout
+        var: linux_uptime.stdout
+      when: ansible_os_family != "Windows"
+
+    - name: Show Windows Uptime
+      debug:
+        var: windows_uptime.stdout
+      when: ansible_os_family == "Windows"

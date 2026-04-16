@@ -1,20 +1,44 @@
 ---
 - name: Domain 4 - Process Monitoring and Management
   hosts: all
+  # Privilege escalation (become: yes) is removed here to prevent Windows WinRM crashes 
+
   tasks:
-    # TASK 1: IDENTIFY HIGH CPU PROCESSES (For Option 3 in Main Menu)
-    - name: Identify high CPU-consuming processes
+    # --- TASK 4.4: DISCOVERY PHASE (Top Resource Consumers) ---
+    
+    - name: Identify high CPU-consuming processes (Linux)
       shell: "ps aux --sort=-%cpu | head -n 10"
-      register: cpu_hogs
-      when: target_process is not defined
+      register: linux_cpu_hogs
+      when: 
+        - target_process is not defined
+        - [cite_start]ansible_os_family != "Windows" [cite: 22]
+
+    - name: Identify high CPU-consuming processes (Windows)
+      win_shell: |
+        Get-Process | Sort-Object CPU -Descending | Select-Object -First 10 | 
+        Select-Object Name, Id, CPU, WorkingSet | ConvertTo-Json
+      register: windows_cpu_hogs
+      when: 
+        - target_process is not defined
+        - [cite_start]ansible_os_family == "Windows" [cite: 22]
 
     - name: Display top resource consumers
       debug:
-        msg: "{{ cpu_hogs.stdout_lines }}"
+        msg: "{{ (ansible_os_family == 'Windows') | ternary(windows_cpu_hogs.stdout, linux_cpu_hogs.stdout_lines) }}"
       when: target_process is not defined
 
-    # TASK 2: TERMINATE UNAUTHORIZED PROCESSES (For Option 4 in Main Menu)
-    - name: Terminate unauthorized or heavy process
+    # --- TASK 4.5: TERMINATION PHASE (The "Smart Weapon") [cite: 513, 516] ---
+
+    - name: Terminate unauthorized or heavy process (Linux)
       command: "pkill {{ target_process }}"
-      when: target_process is defined
+      when: 
+        - target_process is defined
+        - [cite_start]ansible_os_family != "Windows" [cite: 517]
+      ignore_errors: yes
+
+    - name: Terminate unauthorized or heavy process (Windows)
+      win_shell: "Stop-Process -Name {{ target_process }} -Force"
+      when: 
+        - target_process is defined
+        - [cite_start]ansible_os_family == "Windows" [cite: 517]
       ignore_errors: yes
