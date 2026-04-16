@@ -1,0 +1,266 @@
+================================================================
+TEST SCENARIO 2 — New Folder "backup_testing" in Downloads
+================================================================
+
+WHAT THIS DOES:
+  Creates a brand new folder called backup_testing inside
+  C:\Users\vedan\Downloads\ with sample files, then backs
+  it up, verifies it, simulates data loss, and restores it.
+
+SOURCE  : C:\Users\vedan\Downloads\backup_testing
+STORAGE : C:\BackupStorage\
+CONTROL : Ubuntu VM (192.168.56.101)
+
+================================================================
+STEP 1 — Create the backup_testing folder with sample files
+================================================================
+
+Open PowerShell (Admin) on Windows and run these one by one:
+
+Create the folder:
+  New-Item -ItemType Directory -Path "C:\Users\vedan\Downloads\backup_testing" -Force
+
+Create sample files inside it:
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\notes.txt" "Important lab notes - do not delete"
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\config.cfg" "server=192.168.56.1`nport=5985`nuser=admin"
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\report.txt" "Backup testing report - created for Domain 8 demo"
+  New-Item -ItemType Directory -Path "C:\Users\vedan\Downloads\backup_testing\data" -Force
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\data\results.csv" "id,name,score`n1,Alice,95`n2,Bob,88`n3,Carol,92"
+
+Verify the folder and files exist:
+  dir "C:\Users\vedan\Downloads\backup_testing"
+  dir "C:\Users\vedan\Downloads\backup_testing\data"
+
+Read one file to confirm content:
+  cat "C:\Users\vedan\Downloads\backup_testing\notes.txt"
+
+
+================================================================
+STEP 2 — Create a custom playbook for this test
+================================================================
+
+On Ubuntu terminal:
+  nano ~/Automation_software/test_scenario_2.yml
+
+Paste this content:
+---
+- name: "TEST SCENARIO 2 — Backup backup_testing Folder"
+  hosts: windows_lab
+  gather_facts: yes
+  vars:
+    backup_server_ip:   "192.168.56.101"
+    backup_server_user: "labadmin"
+    backup_base_path:   "/home/labadmin/backups"
+
+  tasks:
+    - name: "Backup the backup_testing folder"
+      ansible.builtin.include_tasks: primitives/create_backup.yml
+      vars:
+        backup_source: 'C:\Users\vedan\Downloads\backup_testing'
+        backup_dest:   "C:\\BackupStorage"
+
+    - name: "Confirm backup complete"
+      ansible.builtin.debug:
+        msg: "backup_testing folder backed up to C:\\BackupStorage"
+
+Save: Ctrl+O → Enter → Ctrl+X
+
+
+================================================================
+STEP 3 — Run the backup
+================================================================
+
+  cd ~/Automation_software/automation_platform
+  ansible-playbook ~/Automation_software/test_scenario_2.yml -i inventory/hosts.ini
+
+
+================================================================
+STEP 4 — Verify backup created on Windows (PowerShell)
+================================================================
+
+  dir C:\BackupStorage | findstr backup_testing
+
+Expected output:
+  backup_testing_backup_2026-04-XX_XXXXXX.zip
+  backup_testing_backup_2026-04-XX_XXXXXX.meta.json
+
+Read the metadata file to see the SHA256 hash:
+  Get-Content (dir C:\BackupStorage | Where-Object {$_.Name -match "backup_testing.*meta"} | Select-Object -First 1 -ExpandProperty FullName)
+
+
+================================================================
+STEP 5 — Verify backup integrity via Ansible
+================================================================
+
+On Ubuntu:
+  ansible-playbook playbooks/verify_backups.yml -i inventory/hosts.ini
+
+Expected output:
+  VALID: backup_testing_backup_XXXX.zip checksum matches (XXXXXXX...)
+
+
+================================================================
+STEP 6 — Simulate data loss: delete some files
+================================================================
+
+PowerShell (Admin) — delete individual files to simulate partial corruption:
+
+  Remove-Item "C:\Users\vedan\Downloads\backup_testing\notes.txt" -Force
+  Remove-Item "C:\Users\vedan\Downloads\backup_testing\data\results.csv" -Force
+
+Confirm files are missing:
+  dir "C:\Users\vedan\Downloads\backup_testing"
+  dir "C:\Users\vedan\Downloads\backup_testing\data"
+
+Expected: notes.txt is gone, results.csv is gone
+
+
+================================================================
+STEP 7 — Option A: Restore entire folder from backup
+================================================================
+
+Find the exact backup filename on Windows PowerShell:
+  dir C:\BackupStorage | findstr backup_testing
+
+On Ubuntu (replace XXXXXX with actual timestamp):
+  ansible windows_lab -m win_shell \
+    -a 'Expand-Archive -Path "C:\BackupStorage\backup_testing_backup_2026-04-11_XXXXXX.zip" -DestinationPath "C:\Users\vedan\Downloads\" -Force' \
+    -i inventory/hosts.ini
+
+Confirm all files are restored on Windows PowerShell:
+  dir "C:\Users\vedan\Downloads\backup_testing"
+  dir "C:\Users\vedan\Downloads\backup_testing\data"
+  cat "C:\Users\vedan\Downloads\backup_testing\notes.txt"
+
+Expected:
+  notes.txt        ← restored
+  config.cfg       ← was not deleted, still present
+  report.txt       ← was not deleted, still present
+  data\results.csv ← restored
+
+
+================================================================
+STEP 8 — Option B: Full delete and restore
+================================================================
+
+For a more complete disaster recovery test:
+
+Delete the entire folder (PowerShell Admin):
+  Remove-Item -Recurse -Force "C:\Users\vedan\Downloads\backup_testing"
+
+Confirm it's completely gone:
+  dir "C:\Users\vedan\Downloads\" | findstr backup_testing
+
+Restore the entire folder from backup (Ubuntu):
+  ansible windows_lab -m win_shell \
+    -a 'Expand-Archive -Path "C:\BackupStorage\backup_testing_backup_2026-04-11_XXXXXX.zip" -DestinationPath "C:\Users\vedan\Downloads\" -Force' \
+    -i inventory/hosts.ini
+
+Confirm full restore on Windows PowerShell:
+  dir "C:\Users\vedan\Downloads\backup_testing"
+  cat "C:\Users\vedan\Downloads\backup_testing\notes.txt"
+  cat "C:\Users\vedan\Downloads\backup_testing\data\results.csv"
+
+Expected output of notes.txt:
+  Important lab notes - do not delete
+
+Expected output of results.csv:
+  id,name,score
+  1,Alice,95
+  2,Bob,88
+  3,Carol,92
+
+
+================================================================
+STEP 9 — Run a second backup to test multiple versions
+================================================================
+
+On Ubuntu:
+  ansible-playbook ~/Automation_software/test_scenario_2.yml -i inventory/hosts.ini
+
+Now check Windows PowerShell:
+  dir C:\BackupStorage | findstr backup_testing
+
+You should see TWO backups now:
+  backup_testing_backup_2026-04-11_XXXXXX.zip   ← first
+  backup_testing_backup_2026-04-11_YYYYYY.zip   ← second
+
+
+================================================================
+STEP 10 — Verify both backups are valid
+================================================================
+
+On Ubuntu:
+  ansible-playbook playbooks/verify_backups.yml -i inventory/hosts.ini
+
+Expected:
+  VALID: backup_testing_backup_..._first.zip checksum matches
+  VALID: backup_testing_backup_..._second.zip checksum matches
+
+
+================================================================
+STEP 11 — Schedule automatic backup of this folder
+================================================================
+
+On Ubuntu:
+  ansible windows_lab -m community.windows.win_scheduled_task \
+    -a 'name="backup_testing_auto" actions=[{"path":"powershell.exe","arguments":"-Command Compress-Archive -Path C:\\Users\\vedan\\Downloads\\backup_testing -DestinationPath C:\\BackupStorage\\backup_testing_auto_$(Get-Date -Format yyyyMMdd_HHmmss).zip -Force"}] triggers=[{"type":"time","start_boundary":"2026-01-01T00:00:00","repetition":{"interval":"PT1440M","stop_at_duration_end":false}}] state=present enabled=yes' \
+    -i inventory/hosts.ini
+
+Verify on Windows PowerShell:
+  schtasks /query /fo LIST | findstr /i "backup_testing"
+
+
+================================================================
+STEP 12 — Cleanup old backups of this folder
+================================================================
+
+On Ubuntu:
+  ansible-playbook playbooks/cleanup_backups.yml -i inventory/hosts.ini -e "keep_latest=1"
+
+Verify only 1 backup_testing file remains on Windows PowerShell:
+  dir C:\BackupStorage | findstr backup_testing
+
+
+================================================================
+EXPECTED PLAY RECAP FOR EACH STEP:
+================================================================
+
+  Backup   : ok=6   changed=4   unreachable=0   failed=0
+  Verify   : ok=5   changed=0   unreachable=0   failed=0
+  Restore  : ok=1   changed=1   unreachable=0   failed=0
+  Schedule : ok=1   changed=1   unreachable=0   failed=0
+  Cleanup  : ok=5   changed=1   unreachable=0   failed=0
+
+
+================================================================
+FULL COMMAND SEQUENCE (Quick Reference)
+================================================================
+
+Windows PowerShell (setup):
+  New-Item -ItemType Directory -Path "C:\Users\vedan\Downloads\backup_testing" -Force
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\notes.txt" "Important lab notes"
+  Set-Content "C:\Users\vedan\Downloads\backup_testing\config.cfg" "server=192.168.56.1"
+  dir "C:\Users\vedan\Downloads\backup_testing"
+
+Ubuntu (backup):
+  ansible-playbook ~/Automation_software/test_scenario_2.yml -i inventory/hosts.ini
+
+Ubuntu (verify):
+  ansible-playbook playbooks/verify_backups.yml -i inventory/hosts.ini
+
+Windows PowerShell (break):
+  Remove-Item "C:\Users\vedan\Downloads\backup_testing\notes.txt" -Force
+
+Ubuntu (restore):
+  ansible windows_lab -m win_shell -a 'Expand-Archive -Path "C:\BackupStorage\backup_testing_backup_2026-04-11_XXXXXX.zip" -DestinationPath "C:\Users\vedan\Downloads\" -Force' -i inventory/hosts.ini
+
+Windows PowerShell (confirm):
+  cat "C:\Users\vedan\Downloads\backup_testing\notes.txt"
+
+Ubuntu (cleanup):
+  ansible-playbook playbooks/cleanup_backups.yml -i inventory/hosts.ini -e "keep_latest=1"
+
+================================================================
+END OF TEST SCENARIO 2
+================================================================
