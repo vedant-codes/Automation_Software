@@ -1,13 +1,5 @@
 # primitives/restore_backup.yml
-# ---------------------------------------------------------------------------
-# Primitive: restore_backup
-# Variables required:
-#   backup_id          - archive filename  (e.g. hosts_backup_20250401.tar.gz)
-#   restore_target     - path to extract files into
-#   backup_server_ip   - IP of central backup server
-#   backup_server_user - SSH user on backup server
-#   backup_base_path   - base path on backup server
-# ---------------------------------------------------------------------------
+# Restores a backup from C:\BackupStorage (Windows) or local path (Linux)
 
 - name: "[restore_backup] Set local staging path"
   ansible.builtin.set_fact:
@@ -22,13 +14,6 @@
     mode: '0755'
   when: ansible_os_family != "Windows"
 
-- name: "[restore_backup][Linux] Download archive from backup server"
-  ansible.posix.synchronize:
-    src: "{{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ backup_id }}"
-    dest: "{{ restore_staging_dir }}/{{ backup_id }}"
-    mode: pull
-  when: ansible_os_family != "Windows"
-
 - name: "[restore_backup][Linux] Ensure restore target exists"
   ansible.builtin.file:
     path: "{{ restore_target }}"
@@ -38,15 +23,9 @@
 
 - name: "[restore_backup][Linux] Extract archive to target"
   ansible.builtin.unarchive:
-    src: "{{ restore_staging_dir }}/{{ backup_id }}"
+    src: "{{ backup_dest }}/{{ backup_id }}"
     dest: "{{ restore_target }}"
     remote_src: yes
-  when: ansible_os_family != "Windows"
-
-- name: "[restore_backup][Linux] Cleanup staging"
-  ansible.builtin.file:
-    path: "{{ restore_staging_dir }}/{{ backup_id }}"
-    state: absent
   when: ansible_os_family != "Windows"
 
 # ── Windows ────────────────────────────────────────────────────────────────
@@ -56,12 +35,18 @@
     state: directory
   when: ansible_os_family == "Windows"
 
-- name: "[restore_backup][Windows] Download archive from backup server via SCP"
-  ansible.windows.win_shell: |
-    scp -o StrictHostKeyChecking=no `
-        {{ backup_server_user }}@{{ backup_server_ip }}:{{ backup_base_path }}/{{ inventory_hostname }}/{{ backup_id }} `
-        "{{ restore_staging_dir_win }}\{{ backup_id }}"
+- name: "[restore_backup][Windows] Check backup exists in BackupStorage"
+  ansible.windows.win_stat:
+    path: "C:\\BackupStorage\\{{ backup_id }}"
   when: ansible_os_family == "Windows"
+  register: backup_file_stat
+
+- name: "[restore_backup][Windows] Fail if backup not found"
+  ansible.builtin.fail:
+    msg: "❌ Backup not found: C:\\BackupStorage\\{{ backup_id }}"
+  when:
+    - ansible_os_family == "Windows"
+    - not backup_file_stat.stat.exists
 
 - name: "[restore_backup][Windows] Ensure restore target exists"
   ansible.windows.win_file:
@@ -69,15 +54,24 @@
     state: directory
   when: ansible_os_family == "Windows"
 
-- name: "[restore_backup][Windows] Extract ZIP to target"
+- name: "[restore_backup][Windows] Extract ZIP to restore target"
   ansible.windows.win_shell: |
-    Expand-Archive -Path "{{ restore_staging_dir_win }}\{{ backup_id }}" `
-                   -DestinationPath "{{ restore_target }}" `
-                   -Force
+    $src  = "C:\BackupStorage\{{ backup_id }}"
+    $dest = "{{ restore_target }}"
+    Expand-Archive -Path $src -DestinationPath $dest -Force
+    Write-Output "✅ Restored {{ backup_id }} to $dest"
   when: ansible_os_family == "Windows"
+  register: restore_result
+
+- name: "[restore_backup][Windows] Show restore result"
+  ansible.builtin.debug:
+    msg: "{{ restore_result.stdout }}"
+  when:
+    - ansible_os_family == "Windows"
+    - restore_result is defined
 
 - name: "[restore_backup][Windows] Cleanup staging"
   ansible.windows.win_file:
-    path: "{{ restore_staging_dir_win }}\\{{ backup_id }}"
+    path: "{{ restore_staging_dir_win }}"
     state: absent
   when: ansible_os_family == "Windows"
