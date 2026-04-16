@@ -19,6 +19,7 @@
     # Where to restore on each OS
     restore_target_linux: "/etc"
     restore_target_win:   'C:\Windows\System32\drivers\etc'
+    backup_dest: "C:\\BackupStorage"
 
     # Windows registry file name (if this backup contained a .reg export)
     reg_file_name: "network_registry.reg"
@@ -64,7 +65,7 @@
 
     - name: "[Windows] Restart network adapter after restore"
       ansible.windows.win_shell: |
-        Restart-NetAdapter -Name "*" -Confirm:$false
+        Start-Job { Restart-NetAdapter -Name "*" -Confirm:$false }
       when: ansible_os_family == "Windows"
       ignore_errors: yes
 
